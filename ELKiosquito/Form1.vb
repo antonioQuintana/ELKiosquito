@@ -1,9 +1,37 @@
-﻿Public Class Form1
+﻿Imports Microsoft.Data.SqlClient
+Public Class Form1
+    Private cadenaConexion As String = "Server=.\SQLEXPRESS;Database=SistemaUsuarios;Integrated Security=true; TrustServerCertificate=True;"
     Private FilaSeleccionada As Integer = -1
 
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
         TBContraseña.UseSystemPasswordChar = True
         ManejarEstadoBotones(True) ' Iniciamos en Estado de Creación
+        CargarUsuariosDesdeBD()
+    End Sub
+    Private Sub CargarUsuariosDesdeBD()
+        DGVUsuarios.Rows.Clear()
+        Dim query As String = "SELECT Nombre, Apellido, Usuario, Contrasena, Rol FROM Usuarios"
+        Try
+            Using conexion As New SqlConnection(cadenaConexion)
+                Using comando As New SqlCommand(query, conexion)
+                    conexion.Open()
+                    Using lector As SqlDataReader = comando.ExecuteReader()
+                        While lector.Read()
+                            DGVUsuarios.Rows.Add(
+                                lector("Nombre").ToString(),
+                                lector("Apellido").ToString(),
+                                lector("Usuario").ToString(),
+                                lector("Rol").ToString(),
+                                "Seleccionar",
+                                lector("Contrasena").ToString()
+                            )
+                        End While
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            MessageBox.Show("Error al cargar datos: " & ex.Message, "Error BD", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
     End Sub
 
     ' --- MÁQUINA DE ESTADOS ---
@@ -40,7 +68,23 @@
         End If
         If MessageBox.Show("Controlé los datos y rol antes de agregar", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Question) = DialogResult.Yes Then
 
-            ' TODO: INSERT a Base de Datos aquí
+            Dim query As String = "INSERT INTO Usuarios (Nombre, Apellido, Usuario, Contrasena, Rol) VALUES (@nombre, @apellido, @usuario, @contrasena, @rol)"
+            Try
+                Using conexion As New SqlConnection(cadenaConexion)
+                    Using comando As New SqlCommand(query, conexion)
+                        comando.Parameters.AddWithValue("@nombre", TBNombre.Text)
+                        comando.Parameters.AddWithValue("@apellido", TBApellido.Text)
+                        comando.Parameters.AddWithValue("@usuario", TBUsuario.Text)
+                        comando.Parameters.AddWithValue("@contrasena", TBContraseña.Text)
+                        comando.Parameters.AddWithValue("@rol", CBRol.Text)
+                        conexion.Open()
+                        comando.ExecuteNonQuery()
+                    End Using
+                End Using
+            Catch ex As Exception
+                MessageBox.Show("Error al guardar en BD: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                Return ' Sale de la función para no agregarlo a la grilla si falló la BD
+            End Try
 
             ' El orden debe ser igual al del diseñador de la grilla
             DGVUsuarios.Rows.Add(TBNombre.Text, TBApellido.Text, TBUsuario.Text, CBRol.Text, "Seleccionar", TBContraseña.Text)
@@ -89,7 +133,26 @@
                     nuevaContrasena = TBContraseña.Text ' Solo actualiza si escribió algo nuevo
                 End If
 
-                ' TODO: UPDATE a Base de Datos aquí usando nuevaContrasena
+                Dim usuarioOriginal As String = fila.Cells("DVUsuario").Value.ToString()
+                Dim query As String = "UPDATE Usuarios SET Nombre = @nombre, Apellido = @apellido, Usuario = @nuevoUsuario, Contrasena = @contrasena, Rol = @rol WHERE Usuario = @usuarioOriginal"
+
+                Try
+                    Using conexion As New SqlConnection(cadenaConexion)
+                        Using comando As New SqlCommand(query, conexion)
+                            comando.Parameters.AddWithValue("@nombre", TBNombre.Text)
+                            comando.Parameters.AddWithValue("@apellido", TBApellido.Text)
+                            comando.Parameters.AddWithValue("@nuevoUsuario", TBUsuario.Text)
+                            comando.Parameters.AddWithValue("@contrasena", nuevaContrasena)
+                            comando.Parameters.AddWithValue("@rol", CBRol.Text)
+                            comando.Parameters.AddWithValue("@usuarioOriginal", usuarioOriginal)
+                            conexion.Open()
+                            comando.ExecuteNonQuery()
+                        End Using
+                    End Using
+                Catch ex As Exception
+                    MessageBox.Show("Error al actualizar BD: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End Try
 
                 ' Actualizar Grilla
                 fila.Cells("DVNombre").Value = TBNombre.Text
@@ -109,7 +172,21 @@
         If FilaSeleccionada >= 0 Then
             If MessageBox.Show("¿Está seguro que desea eliminar este usuario?", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Question) = DialogResult.Yes Then
 
-                ' TODO: DELETE a Base de Datos aquí
+                Dim usuarioAEliminar As String = DGVUsuarios.Rows(FilaSeleccionada).Cells("DVUsuario").Value.ToString()
+                Dim query As String = "DELETE FROM Usuarios WHERE Usuario = @usuario"
+
+                Try
+                    Using conexion As New SqlConnection(cadenaConexion)
+                        Using comando As New SqlCommand(query, conexion)
+                            comando.Parameters.AddWithValue("@usuario", usuarioAEliminar)
+                            conexion.Open()
+                            comando.ExecuteNonQuery()
+                        End Using
+                    End Using
+                Catch ex As Exception
+                    MessageBox.Show("Error al eliminar de BD: " & ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    Return
+                End Try
 
                 DGVUsuarios.Rows.RemoveAt(FilaSeleccionada)
                 LimpiarCampos()
@@ -117,53 +194,54 @@
         End If
     End Sub
 
-    ' --- 5. SEARCH: Buscar Usuario ---
+    ' --- 5. SEARCH: Buscar Usuario (Versión SQL) ---
     Private Sub BTBuscarU_Click(sender As Object, e As EventArgs) Handles BTBuscarU.Click
         Dim busqueda As String = TBUsuario.Text.Trim()
 
-        ' Validar que el usuario haya escrito algo en el campo
         If String.IsNullOrWhiteSpace(busqueda) Then
             MessageBox.Show("Por favor, ingrese un nombre de usuario en el campo 'Usuario' para buscar.", "Atención", MessageBoxButtons.OK, MessageBoxIcon.Warning)
             Return
         End If
 
-        Dim encontrado As Boolean = False
+        Dim query As String = "SELECT Nombre, Apellido, Usuario, Contrasena, Rol FROM Usuarios WHERE Usuario = @usuarioBuscado"
 
-        ' Recorrer la grilla para buscar la coincidencia
-        For Each fila As DataGridViewRow In DGVUsuarios.Rows
-            If Not fila.IsNewRow Then
-                Dim usuarioGrilla As String = fila.Cells("DVUsuario").Value?.ToString()
+        Try
+            Using conexion As New SqlConnection(cadenaConexion)
+                Using comando As New SqlCommand(query, conexion)
+                    comando.Parameters.AddWithValue("@usuarioBuscado", busqueda)
 
-                ' Compara ignorando mayúsculas y minúsculas
-                If String.Equals(usuarioGrilla, busqueda, StringComparison.OrdinalIgnoreCase) Then
-                    encontrado = True
-                    FilaSeleccionada = fila.Index
+                    conexion.Open()
+                    Using lector As SqlDataReader = comando.ExecuteReader()
+                        If lector.Read() Then
+                            ' El usuario existe en la BD, cargamos los datos en los TextBoxes
+                            TBNombre.Text = lector("Nombre").ToString()
+                            TBApellido.Text = lector("Apellido").ToString()
+                            TBUsuario.Text = lector("Usuario").ToString()
+                            CBRol.Text = lector("Rol").ToString()
+                            TBContraseña.Clear()
 
-                    ' Autocompletar los campos con los datos encontrados
-                    TBNombre.Text = fila.Cells("DVNombre").Value?.ToString()
-                    TBApellido.Text = fila.Cells("DVApellido").Value?.ToString()
-                    TBUsuario.Text = fila.Cells("DVUsuario").Value?.ToString()
-                    CBRol.Text = fila.Cells("DVRol").Value?.ToString()
-                    TBContraseña.Clear()
+                            ManejarEstadoBotones(False) ' Pasamos a Estado de Edición
 
-                    ManejarEstadoBotones(False) ' Pasamos a Estado de Edición
-
-                    ' Opcional: Resaltar la fila en la grilla
-                    fila.Selected = True
-                    DGVUsuarios.CurrentCell = fila.Cells("DVUsuario") ' Mueve el foco a esa fila
-
-                    Exit For ' Detiene el bucle ya que el usuario es único
-                End If
-            End If
-        Next
-
-        ' Si termina el bucle y no se encontró
-        If Not encontrado Then
-            MessageBox.Show("No se encontró ningún usuario con el nombre '" & busqueda & "'.", "Búsqueda fallida", MessageBoxButtons.OK, MessageBoxIcon.Information)
-            ' Opcional: Limpiar el campo para que intente de nuevo
-            TBUsuario.Focus()
-            TBUsuario.SelectAll()
-        End If
+                            ' Resaltar la fila correspondiente en la grilla visualmente
+                            For Each fila As DataGridViewRow In DGVUsuarios.Rows
+                                If Not fila.IsNewRow AndAlso fila.Cells("DVUsuario").Value?.ToString().ToLower() = busqueda.ToLower() Then
+                                    fila.Selected = True
+                                    DGVUsuarios.CurrentCell = fila.Cells("DVUsuario")
+                                    FilaSeleccionada = fila.Index
+                                    Exit For
+                                End If
+                            Next
+                        Else
+                            MessageBox.Show("No se encontró ningún usuario con el nombre '" & busqueda & "'.", "Búsqueda fallida", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                            TBUsuario.Focus()
+                            TBUsuario.SelectAll()
+                        End If
+                    End Using
+                End Using
+            End Using
+        Catch ex As Exception
+            MessageBox.Show("Error al buscar en la BD: " & ex.Message, "Error SQL", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        End Try
     End Sub
 
     ' --- 6. CANCEL: Cancelar Acción ---
